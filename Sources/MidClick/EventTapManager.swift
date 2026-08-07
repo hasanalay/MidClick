@@ -3,33 +3,56 @@ import Foundation
 import MidClickCore
 
 final class EventTapManager {
-    var isEnabled: Bool = true
+    var isEnabled: Bool = true {
+        didSet {
+            if !isEnabled {
+                tapRecognizer.reset()
+            }
+        }
+    }
+
+    var trigger: MiddleClickTrigger = .centerClick {
+        didSet {
+            if trigger != oldValue {
+                tapRecognizer.reset()
+            }
+        }
+    }
 
     var isRunning: Bool {
         eventTap != nil
     }
 
     private let touchMonitor: MagicTouchMonitor
-    private let recognizer: CenterClickRecognizer
+    private let physicalRecognizer: PhysicalClickRecognizer
     private let emitter: MiddleClickEmitter
 
+    private var tapRecognizer: TapGestureRecognizer
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var isConvertingCurrentClick = false
 
     init(
         touchMonitor: MagicTouchMonitor,
-        recognizer: CenterClickRecognizer = .init(),
+        physicalRecognizer: PhysicalClickRecognizer = .init(),
+        tapRecognizer: TapGestureRecognizer = .init(),
         emitter: MiddleClickEmitter = .init()
     ) {
         self.touchMonitor = touchMonitor
-        self.recognizer = recognizer
+        self.physicalRecognizer = physicalRecognizer
+        self.tapRecognizer = tapRecognizer
         self.emitter = emitter
     }
 
     @discardableResult
     func start() -> Bool {
         guard eventTap == nil else { return true }
+
+        touchMonitor.setFrameHandler { [weak self] contacts, timestamp in
+            DispatchQueue.main.async {
+                self?.handleTouchFrame(contacts: contacts, timestamp: timestamp)
+            }
+        }
 
         let eventMask = (1 << CGEventType.leftMouseDown.rawValue)
             | (1 << CGEventType.leftMouseUp.rawValue)
@@ -55,11 +78,13 @@ final class EventTapManager {
             callback: callback,
             userInfo: userInfo
         ) else {
+            touchMonitor.setFrameHandler(nil)
             return false
         }
 
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             CFMachPortInvalidate(tap)
+            touchMonitor.setFrameHandler(nil)
             return false
         }
 
@@ -71,6 +96,9 @@ final class EventTapManager {
     }
 
     func stop() {
+        touchMonitor.setFrameHandler(nil)
+        tapRecognizer.reset()
+
         if isConvertingCurrentClick {
             if let event = CGEvent(source: nil) {
                 emitter.mouseUp(at: event.location)
@@ -100,12 +128,19 @@ final class EventTapManager {
 
         switch type {
         case .leftMouseDown:
+            tapRecognizer.cancel()
+
             guard isEnabled else {
                 return Unmanaged.passUnretained(event)
             }
 
+            guard !trigger.isTap else {
+                return Unmanaged.passUnretained(event)
+            }
+
             let snapshot = touchMonitor.snapshot()
-            guard recognizer.shouldConvertClick(
+            guard physicalRecognizer.shouldConvertClick(
+                trigger: trigger,
                 contacts: snapshot.contacts,
                 sampleAge: snapshot.age
             ) else {
@@ -128,5 +163,23 @@ final class EventTapManager {
         default:
             return Unmanaged.passUnretained(event)
         }
+    }
+
+    private func handleTouchFrame(contacts: [TouchContact], timestamp: TimeInterval) {
+        guard isEnabled, trigger.isTap else {
+            tapRecognizer.reset()
+            return
+        }
+
+        let selectedTrigger = trigger
+        let didRecognizeTap = tapRecognizer.processFrame(
+            contacts: contacts,
+            timestamp: timestamp,
+            requiredFingerCount: selectedTrigger.requiredFingerCount
+        )
+
+        guard didRecognizeTap, trigger == selectedTrigger, isEnabled else { return }
+        guard let event = CGEvent(source: nil) else { return }
+        emitter.click(at: event.location)
     }
 }
