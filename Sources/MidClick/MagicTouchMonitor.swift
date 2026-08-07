@@ -35,7 +35,7 @@ private struct MTTouch {
 private typealias MTDeviceRef = UnsafeMutableRawPointer
 private typealias MTContactCallback = @convention(c) (
     Int32,
-    UnsafeMutablePointer<MTTouch>?,
+    UnsafeMutableRawPointer?,
     Int32,
     Double,
     Int32
@@ -46,8 +46,8 @@ private typealias MTUnregisterContactFrameCallback = @convention(c) (MTDeviceRef
 private typealias MTDeviceStart = @convention(c) (MTDeviceRef, Int32) -> Void
 private typealias MTDeviceStop = @convention(c) (MTDeviceRef) -> Void
 
-private let midClickContactCallback: MTContactCallback = { _, touches, count, _, _ in
-    MagicTouchMonitor.shared.consume(touches: touches, count: count)
+private let midClickContactCallback: MTContactCallback = { _, rawTouches, count, _, _ in
+    MagicTouchMonitor.shared.consume(rawTouches: rawTouches, count: count)
     return 0
 }
 
@@ -170,10 +170,11 @@ final class MagicTouchMonitor {
         return Snapshot(contacts: contacts, age: age)
     }
 
-    fileprivate func consume(touches: UnsafeMutablePointer<MTTouch>?, count: Int32) {
+    fileprivate func consume(rawTouches: UnsafeMutableRawPointer?, count: Int32) {
         let newContacts: [TouchContact]
 
-        if let touches, count > 0 {
+        if let rawTouches, count > 0 {
+            let touches = rawTouches.bindMemory(to: MTTouch.self, capacity: Int(count))
             let buffer = UnsafeBufferPointer(start: touches, count: Int(count))
             newContacts = buffer.map { touch in
                 TouchContact(
