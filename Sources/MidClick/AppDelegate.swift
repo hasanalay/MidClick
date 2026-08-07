@@ -118,7 +118,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .stopped:
             touchStatusMenuItem?.title = "Touch Input: Stopped"
         case .active(let deviceCount):
-            touchStatusMenuItem?.title = "Touch Input: Active (\(deviceCount))"
+            touchStatusMenuItem?.title = deviceCount == 1
+                ? "Touch Input: Magic Mouse"
+                : "Touch Input: Magic Mouse (\(deviceCount))"
         case .unavailable(let reason):
             touchStatusMenuItem?.title = "Touch Input: Unavailable — \(reason)"
         }
