@@ -1,5 +1,6 @@
 import CoreFoundation
 import Foundation
+import IOKit
 import MidClickCore
 import Darwin
 
@@ -34,7 +35,7 @@ private struct MTTouch {
 
 private typealias MTDeviceRef = UnsafeMutableRawPointer
 private typealias MTContactCallback = @convention(c) (
-    Int32,
+    MTDeviceRef?,
     UnsafeMutableRawPointer?,
     Int32,
     Double,
@@ -45,6 +46,7 @@ private typealias MTRegisterContactFrameCallback = @convention(c) (MTDeviceRef, 
 private typealias MTUnregisterContactFrameCallback = @convention(c) (MTDeviceRef, MTContactCallback) -> Void
 private typealias MTDeviceStart = @convention(c) (MTDeviceRef, Int32) -> Void
 private typealias MTDeviceStop = @convention(c) (MTDeviceRef) -> Void
+private typealias MTDeviceGetService = @convention(c) (MTDeviceRef) -> io_service_t
 
 private let midClickContactCallback: MTContactCallback = { _, rawTouches, count, _, _ in
     MagicTouchMonitor.shared.consume(rawTouches: rawTouches, count: count)
@@ -97,7 +99,8 @@ final class MagicTouchMonitor {
         guard
             let createList: MTDeviceCreateList = symbol(named: "MTDeviceCreateList", in: handle),
             let register: MTRegisterContactFrameCallback = symbol(named: "MTRegisterContactFrameCallback", in: handle),
-            let startDevice: MTDeviceStart = symbol(named: "MTDeviceStart", in: handle)
+            let startDevice: MTDeviceStart = symbol(named: "MTDeviceStart", in: handle),
+            let getService: MTDeviceGetService = symbol(named: "MTDeviceGetService", in: handle)
         else {
             status = .unavailable("Required multitouch symbols are unavailable")
             dlclose(handle)
@@ -120,13 +123,27 @@ final class MagicTouchMonitor {
         for index in 0..<count {
             guard let rawDevice = CFArrayGetValueAtIndex(list, index) else { continue }
             let device = UnsafeMutableRawPointer(mutating: rawDevice)
+            let service = getService(device)
+
+            guard service != IO_OBJECT_NULL else { continue }
+
+            let productID = registryNumber(service: service, key: "ProductID")?.uint32Value
+            let productName = registryString(service: service, key: "Product")
+
+            guard MagicMouseDeviceMatcher.isMagicMouse(
+                productID: productID,
+                productName: productName
+            ) else {
+                continue
+            }
+
             register(device, midClickContactCallback)
             startDevice(device, 0)
             devices.append(device)
         }
 
         guard !devices.isEmpty else {
-            status = .unavailable("No usable multitouch devices were found")
+            status = .unavailable("No Magic Mouse was found")
             return false
         }
 
@@ -191,6 +208,46 @@ final class MagicTouchMonitor {
         contacts = newContacts
         lastFrameUptime = ProcessInfo.processInfo.systemUptime
         lock.unlock()
+    }
+
+    private func registryNumber(service: io_service_t, key: String) -> NSNumber? {
+        registryProperty(service: service, key: key) as? NSNumber
+    }
+
+    private func registryString(service: io_service_t, key: String) -> String? {
+        registryProperty(service: service, key: key) as? String
+    }
+
+    private func registryProperty(service: io_service_t, key: String) -> AnyObject? {
+        let key = key as CFString
+
+        if let value = IORegistryEntryCreateCFProperty(
+            service,
+            key,
+            kCFAllocatorDefault,
+            0
+        ) {
+            return value.takeRetainedValue()
+        }
+
+        let searchOptions: [IOOptionBits] = [
+            IOOptionBits(kIORegistryIterateRecursively),
+            IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)
+        ]
+
+        for options in searchOptions {
+            if let value = IORegistryEntrySearchCFProperty(
+                service,
+                kIOServicePlane,
+                key,
+                kCFAllocatorDefault,
+                options
+            ) {
+                return value
+            }
+        }
+
+        return nil
     }
 
     private func symbol<T>(named name: String, in handle: UnsafeMutableRawPointer) -> T? {
