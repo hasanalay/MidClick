@@ -65,11 +65,14 @@ final class MagicTouchMonitor {
         let age: TimeInterval
     }
 
+    typealias FrameHandler = ([TouchContact], TimeInterval) -> Void
+
     static let shared = MagicTouchMonitor()
 
     private let lock = NSLock()
     private var contacts: [TouchContact] = []
     private var lastFrameUptime: TimeInterval = 0
+    private var frameHandler: FrameHandler?
 
     private var frameworkHandle: UnsafeMutableRawPointer?
     private var deviceList: CFArray?
@@ -168,9 +171,16 @@ final class MagicTouchMonitor {
         lock.lock()
         contacts = []
         lastFrameUptime = 0
+        frameHandler = nil
         lock.unlock()
 
         status = .stopped
+    }
+
+    func setFrameHandler(_ handler: FrameHandler?) {
+        lock.lock()
+        frameHandler = handler
+        lock.unlock()
     }
 
     func snapshot() -> Snapshot {
@@ -204,10 +214,16 @@ final class MagicTouchMonitor {
             newContacts = []
         }
 
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let handler: FrameHandler?
+
         lock.lock()
         contacts = newContacts
-        lastFrameUptime = ProcessInfo.processInfo.systemUptime
+        lastFrameUptime = uptime
+        handler = frameHandler
         lock.unlock()
+
+        handler?(newContacts, uptime)
     }
 
     private func registryNumber(service: io_service_t, key: String) -> NSNumber? {
