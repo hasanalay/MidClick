@@ -1,10 +1,13 @@
 import AppKit
 
-func main() {
+@MainActor
+func runApplication() {
     let appDelegate = AppDelegate()
     let application = NSApplication.shared
     application.delegate = appDelegate
     application.run()
 }
 
-main()
+MainActor.assumeIsolated {
+    runApplication()
+}
