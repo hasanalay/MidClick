@@ -11,6 +11,11 @@ final class MiddleClickEmitter {
         post(type: .otherMouseUp, at: location)
     }
 
+    func click(at location: CGPoint) {
+        mouseDown(at: location)
+        mouseUp(at: location)
+    }
+
     private func post(type: CGEventType, at location: CGPoint) {
         guard let event = CGEvent(
             mouseEventSource: source,
