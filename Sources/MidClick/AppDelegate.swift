@@ -8,11 +8,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
     private var enabledMenuItem: NSMenuItem?
+    private var triggerMenuItems: [NSMenuItem] = []
     private var accessibilityMenuItem: NSMenuItem?
     private var touchStatusMenuItem: NSMenuItem?
     private var statusTimer: Timer?
 
     private let enabledDefaultsKey = "middleClickEnabled"
+    private let triggerDefaultsKey = "middleClickTrigger"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -21,6 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(true, forKey: enabledDefaultsKey)
         }
         eventTapManager.isEnabled = UserDefaults.standard.bool(forKey: enabledDefaultsKey)
+
+        let storedTrigger = UserDefaults.standard.string(forKey: triggerDefaultsKey)
+        let selectedTrigger = storedTrigger
+            .flatMap(MiddleClickTrigger.init(rawValue:))
+            ?? .centerClick
+        eventTapManager.trigger = selectedTrigger
+        UserDefaults.standard.set(selectedTrigger.rawValue, forKey: triggerDefaultsKey)
 
         configureMenuBar()
         touchMonitor.start()
@@ -65,6 +74,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(enabled)
         enabledMenuItem = enabled
 
+        let triggerItem = NSMenuItem(title: "Trigger", action: nil, keyEquivalent: "")
+        let triggerMenu = NSMenu(title: "Trigger")
+
+        for trigger in MiddleClickTrigger.allCases {
+            let triggerOption = NSMenuItem(
+                title: trigger.displayName,
+                action: #selector(selectTrigger(_:)),
+                keyEquivalent: ""
+            )
+            triggerOption.target = self
+            triggerOption.representedObject = trigger.rawValue
+            triggerMenu.addItem(triggerOption)
+            triggerMenuItems.append(triggerOption)
+        }
+
+        triggerItem.submenu = triggerMenu
+        menu.addItem(triggerItem)
+
         menu.addItem(.separator())
 
         let accessibility = NSMenuItem(
@@ -106,6 +133,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshMenuState() {
         enabledMenuItem?.state = eventTapManager.isEnabled ? .on : .off
 
+        for menuItem in triggerMenuItems {
+            let rawValue = menuItem.representedObject as? String
+            menuItem.state = rawValue == eventTapManager.trigger.rawValue ? .on : .off
+        }
+
         if AccessibilityPermission.isGranted {
             accessibilityMenuItem?.title = eventTapManager.isRunning
                 ? "Accessibility: Granted"
@@ -130,6 +162,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func toggleEnabled() {
         eventTapManager.isEnabled.toggle()
         UserDefaults.standard.set(eventTapManager.isEnabled, forKey: enabledDefaultsKey)
+        refreshMenuState()
+    }
+
+    @objc
+    private func selectTrigger(_ sender: NSMenuItem) {
+        guard
+            let rawValue = sender.representedObject as? String,
+            let trigger = MiddleClickTrigger(rawValue: rawValue)
+        else {
+            return
+        }
+
+        eventTapManager.trigger = trigger
+        UserDefaults.standard.set(trigger.rawValue, forKey: triggerDefaultsKey)
         refreshMenuState()
     }
 
