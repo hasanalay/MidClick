@@ -32,11 +32,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         refreshMenuState()
-        statusTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.refreshRuntimeState()
-            }
-        }
+        statusTimer = Timer.scheduledTimer(
+            timeInterval: 1.5,
+            target: self,
+            selector: #selector(handleStatusTimer(_:)),
+            userInfo: nil,
+            repeats: true
+        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -87,6 +89,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         item.menu = menu
         statusItem = item
+    }
+
+    @objc
+    private func handleStatusTimer(_ timer: Timer) {
+        refreshRuntimeState()
     }
 
     private func refreshRuntimeState() {
